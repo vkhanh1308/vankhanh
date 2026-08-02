@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Tag, Tabs, Table, Button, Space, Modal, Form, Input, DatePicker, InputNumber, Select, message, Popconfirm, Tooltip } from 'antd';
 import axios from 'axios';
 import dayjs from 'dayjs';
-import { EyeOutlined, EditOutlined, LockOutlined, DeleteOutlined } from '@ant-design/icons';
+import { EyeOutlined, FileDoneOutlined, EditOutlined, LockOutlined, DeleteOutlined, PaperClipOutlined } from '@ant-design/icons';
 const API_URL = 'http://localhost:8000/api/ho-so/';
 const BASE_URL = 'http://localhost:8000';
 
@@ -26,7 +26,7 @@ const ListHoSo = () => {
     const [vbDenData, setVbDenData] = useState([]);
     const [vbDiData, setVbDiData] = useState([]);
     const [modalLoading, setModalLoading] = useState(false);
-
+    const [nopLuuLoading, setNopLuuLoading] = useState(null);
     // 1. Khởi tạo State phân trang
     const [pagination, setPagination] = useState({
         current: 1,
@@ -99,6 +99,18 @@ const ListHoSo = () => {
         }
     };
 
+    const handleNopLuu = async (maHoSo) => {
+        try {
+            await axios.patch(`${BASE_URL}/api/ho-so/${maHoSo}/nop-luu`, {}, {
+                headers: getAuthHeaders()
+            });
+            message.success("Nộp lưu hồ sơ thành công!");
+
+            fetchData(pagination.current, pagination.pageSize, searchText);
+        } catch (error) {
+            message.error(error.response?.data?.detail || "Lỗi nộp lưu");
+        }
+    };
 
     const handleViewDetails = async (record) => {
         setCurrentHoSo(record);
@@ -176,8 +188,20 @@ const ListHoSo = () => {
             align: 'center',
             width: 120,
             render: (text) => {
-                let color = text === 'DANG_MO' ? 'green' : (text === 'DA_DONG' ? 'red' : 'default');
-                let label = text === 'DANG_MO' ? 'Đang mở' : (text === 'DA_DONG' ? 'Đã đóng' : text);
+                let color = 'default';
+                let label = text;
+
+                if (text === 'DANG_MO') {
+                    color = 'green';
+                    label = 'Đang mở';
+                } else if (text === 'DA_DONG') {
+                    color = 'red';
+                    label = 'Đã đóng';
+                } else if (text === 'DA_NOP_LUU') {
+                    color = 'blue'; // Màu xanh dương chuyên nghiệp cho kho lưu trữ
+                    label = 'Đã nộp lưu';
+                }
+
                 return <Tag color={color}>{label || 'Đang mở'}</Tag>;
             }
         },
@@ -234,9 +258,8 @@ const ListHoSo = () => {
             title: 'Hành động',
             key: 'action',
             align: 'center',
-            width: 220, // Tăng width đủ rộng để chứa 4 khối nút
+            width: 280, // Tăng nhẹ width để chứa thêm nút Nộp lưu
             render: (_, record) => (
-                // Dùng whiteSpace: 'nowrap' để ép các nút luôn nằm trên 1 hàng ngang
                 <Space size="small" style={{ whiteSpace: 'nowrap' }}>
                     <Tooltip title="Xem văn bản">
                         <Button type="primary" icon={<EyeOutlined />} onClick={() => handleViewDetails(record)} />
@@ -250,6 +273,24 @@ const ListHoSo = () => {
                         <Tooltip title="Đóng hồ sơ">
                             <Popconfirm title="Bạn có chắc muốn đóng hồ sơ này?" onConfirm={() => handleDongHoSo(record.ma_ho_so)}>
                                 <Button type="primary" style={{ backgroundColor: '#faad14' }} icon={<LockOutlined />} />
+                            </Popconfirm>
+                        </Tooltip>
+                    )}
+                    {record.trang_thai === 'DA_DONG' && (
+                        <Tooltip title="Nộp lưu hồ sơ">
+                            <Popconfirm
+                                title="Xác nhận nộp lưu"
+                                description="Bạn có chắc chắn muốn nộp lưu hồ sơ này?"
+                                onConfirm={() => handleNopLuu(record.ma_ho_so)}
+                                okText="Đồng ý"
+                                cancelText="Hủy"
+                            >
+                                <Button
+                                    type="primary"
+                                    icon={<FileDoneOutlined />}
+                                    loading={nopLuuLoading === record.ma_ho_so}
+                                    style={{ backgroundColor: '#1677ff', borderColor: '#1677ff' }}
+                                />
                             </Popconfirm>
                         </Tooltip>
                     )}
@@ -293,6 +334,28 @@ const ListHoSo = () => {
             )
         },
         {
+            title: 'Tệp đính kèm',
+            dataIndex: 'tep_dinh_kems',
+            key: 'tep_dinh_kems',
+            width: 220,
+            render: (tep_dinh_kems) => {
+                const files = tep_dinh_kems || [];
+                if (!files.length) return 'Không có file';
+                return (
+                    <Space direction="vertical" size="mini">
+                        {files.map((file) => (
+                            <Tooltip title={file.ten_file} key={file.id || file.ten_file} placement="topLeft">
+                                <a href={`${BASE_URL}/${file.duong_dan.replaceAll('\\', '/').replace(/^\//, '')}`} target="_blank" rel="noreferrer">
+                                    <PaperClipOutlined style={{ marginRight: 6 }} />
+                                    {file.ten_file}
+                                </a>
+                            </Tooltip>
+                        ))}
+                    </Space>
+                );
+            }
+        },
+        {
             title: 'Ngày đến',
             dataIndex: 'ngay_den',
             key: 'ngay_den',
@@ -321,6 +384,28 @@ const ListHoSo = () => {
                     <span style={{ cursor: 'pointer' }}>{text}</span>
                 </Tooltip>
             )
+        },
+        {
+            title: 'Tệp đính kèm',
+            dataIndex: 'tep_dinh_kems',
+            key: 'tep_dinh_kems',
+            width: 220,
+            render: (tep_dinh_kems) => {
+                const files = tep_dinh_kems || [];
+                if (!files.length) return 'Không có file';
+                return (
+                    <Space direction="vertical" size="mini">
+                        {files.map((file) => (
+                            <Tooltip title={file.ten_file} key={file.id || file.ten_file} placement="topLeft">
+                                <a href={`${BASE_URL}/${file.duong_dan.replaceAll('\\', '/').replace(/^\//, '')}`} target="_blank" rel="noreferrer">
+                                    <PaperClipOutlined style={{ marginRight: 6 }} />
+                                    {file.ten_file}
+                                </a>
+                            </Tooltip>
+                        ))}
+                    </Space>
+                );
+            }
         },
         {
             title: 'Ngày ban hành',
@@ -425,15 +510,32 @@ const ListHoSo = () => {
                         <Form.Item name="ngay_bat_dau" label="Ngày bắt đầu" style={{ width: '50%' }}>
                             <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
                         </Form.Item>
-                        <Form.Item name="ngay_ket_thuc" label="Ngày kết thúc" style={{ width: '50%' }}>
+                        <Form.Item
+                            name="ngay_ket_thuc"
+                            label="Ngày kết thúc"
+                            style={{ width: '50%' }}
+                            dependencies={["ngay_bat_dau"]}
+                            rules={[
+                                ({ getFieldValue }) => ({
+                                    validator(_, value) {
+                                        const ngayBatDau = getFieldValue('ngay_bat_dau');
+                                        if (!value || !ngayBatDau || value.isSame(ngayBatDau) || value.isAfter(ngayBatDau)) {
+                                            return Promise.resolve();
+                                        }
+                                        return Promise.reject(new Error('Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu'));
+                                    }
+                                })
+                            ]}
+                        >
                             <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
                         </Form.Item>
                     </Space>
                     <Form.Item name="so_luong_trang" label="Số lượng trang" rules={[{ type: 'number', min: 0, message: 'Số trang không được âm!' }]}>
-                        <InputNumber style={{ width: '100%' }} />
+
+                        <InputNumber min={0} style={{ width: '100%' }} />
                     </Form.Item>
                     <Form.Item name="so_luong_van_ban" label="Số lượng văn bản" rules={[{ type: 'number', min: 0, message: 'Số lượng không được âm!' }]}>
-                        <InputNumber style={{ width: '100%' }} />
+                        <InputNumber min={0} style={{ width: '100%' }} />
                     </Form.Item>
                     <Form.Item name="nguoi_lap" label="Người lập"><Input /></Form.Item>
                     <Form.Item name="ngon_ngu" label="Ngôn ngữ"><Input /></Form.Item>

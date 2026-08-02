@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from config.database import get_db
 
@@ -7,7 +8,7 @@ from app.models.core import CoQuanToChuc
 from app.schemas.co_quan_schema import CoQuanCreate, CoQuanResponse
 
 # Gắn thêm bảo vệ
-from app.dependencies import lay_nguoi_dung_hien_tai
+from app.dependencies import lay_nguoi_dung_hien_tai, require_roles
 from app.models.auth import TaiKhoan
 
 router = APIRouter(
@@ -20,7 +21,7 @@ router = APIRouter(
 def tao_co_quan(
     co_quan: CoQuanCreate,
     db: Session = Depends(get_db),
-    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)  # Khóa API này lại
+    nguoi_dung: TaiKhoan = Depends(require_roles(["ADMIN", "VAN_THU"]))
 ):
     kiem_tra = db.query(CoQuanToChuc).filter(
         CoQuanToChuc.organ_id == co_quan.organ_id).first()
@@ -98,3 +99,46 @@ def xoa_co_quan(
             status_code=400, 
             detail="Không thể xóa cơ quan này vì đang có dữ liệu Cán bộ hoặc Văn bản liên kết dữ liệu khóa ngoại!"
         )
+    return db.query(CoQuanToChuc).order_by(CoQuanToChuc.id.desc()).all()
+
+
+@router.put("/{id}", response_model=CoQuanResponse)
+def cap_nhat_co_quan(
+    id: int,
+    co_quan: CoQuanCreate,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(require_roles(["ADMIN", "VAN_THU"]))
+):
+    co_quan_hien_tai = db.query(CoQuanToChuc).filter(
+        CoQuanToChuc.id == id).first()
+    if not co_quan_hien_tai:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cơ quan")
+
+    existing = db.query(CoQuanToChuc).filter(
+        CoQuanToChuc.organ_id == co_quan.organ_id, CoQuanToChuc.id != id).first()
+    if existing:
+        raise HTTPException(
+            status_code=400, detail="Mã định danh (organ_id) đã tồn tại!")
+
+    co_quan_hien_tai.ten_co_quan = co_quan.ten_co_quan
+    co_quan_hien_tai.organ_id = co_quan.organ_id
+    co_quan_hien_tai.dia_chi = co_quan.dia_chi
+
+    db.commit()
+    db.refresh(co_quan_hien_tai)
+    return co_quan_hien_tai
+
+
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def xoa_co_quan(
+    id: int,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(require_roles(["ADMIN", "VAN_THU"]))
+):
+    co_quan = db.query(CoQuanToChuc).filter(CoQuanToChuc.id == id).first()
+    if not co_quan:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cơ quan")
+
+    db.delete(co_quan)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

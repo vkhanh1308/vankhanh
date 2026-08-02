@@ -2,10 +2,22 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-class CanBoResponse(BaseModel):
-    id: int
+class CanBoBase(BaseModel):
     ho_ten: str
     chuc_vu: Optional[str] = None
+    co_quan_id: int
+
+
+class CanBoCreate(CanBoBase):
+    pass
+
+
+class CanBoUpdate(CanBoBase):
+    pass
+
+
+class CanBoResponse(CanBoBase):
+    id: int
 
     class Config:
         from_attributes = True

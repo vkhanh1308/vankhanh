@@ -166,6 +166,11 @@ Token được trả về từ API đăng nhập.
     }
   ]
   ```
+### 5.3 Nộp lưu hồ sơ (MỚI)
+- **Method:** PATCH `/api/ho-so/{ma_ho_so}/nop-luu`
+- **Auth:** Bearer Token
+- **Response:** { "message": "Nộp lưu hồ sơ thành công!" }
+- **Error 400:** "Chỉ hồ sơ đã đóng mới được nộp lưu", "Hồ sơ rỗng không được nộp lưu"
 
 ---
 

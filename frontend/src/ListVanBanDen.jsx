@@ -21,6 +21,9 @@ const ListVanBanDen = () => {
     });
     // State mới để chứa File tải lên
     const [fileList, setFileList] = useState([]);
+    useEffect(() => {
+        console.log('ListVanBanDen fileList state:', fileList);
+    }, [fileList]);
     // State cho Modal Phân phối
     const [isPhanPhoiModalVisible, setIsPhanPhoiModalVisible] = useState(false);
     const [phanPhoiRecord, setPhanPhoiRecord] = useState(null);
@@ -155,22 +158,49 @@ const ListVanBanDen = () => {
             // --- NẾU CÓ CHỌN FILE THÌ ĐẨY LÊN BẰNG API RIÊNG ---
             if (fileList.length > 0 && vanBanId) {
                 const formData = new FormData();
-                fileList.forEach(file => {
-                    // Lấy file vật lý từ Antd Upload
-                    formData.append('files', file.originFileObj || file);
-                });
-
-                await axios.post(`${BASE_URL}/api/van-ban-den/${vanBanId}/upload`, formData, {
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'multipart/form-data'
+                // Only append real files (local selections)
+                const filesToUpload = fileList.filter((f) => f.originFileObj);
+                // Read each file fully and append a fresh File instance to avoid upload-change errors
+                for (const file of filesToUpload) {
+                    try {
+                        const original = file.originFileObj;
+                        const buffer = await original.arrayBuffer();
+                        const safeFile = new File([buffer], original.name, { type: original.type });
+                        formData.append('files', safeFile);
+                    } catch (e) {
+                        formData.append('files', file.originFileObj);
                     }
-                });
-                message.success('Đã tải lên tệp đính kèm!');
+                }
+
+                if (filesToUpload.length > 0) {
+                    const uploadRes = await axios.post(`${BASE_URL}/api/van-ban-den/${vanBanId}/upload`, formData, {
+                        headers: {
+                            ...getAuthHeaders(),
+                            'Content-Type': 'multipart/form-data'
+                        }
+                    });
+
+                    // If backend returns stored file info, map them to Upload items so UI shows names/links
+                    const returned = uploadRes.data?.files || [];
+                    const serverFiles = returned.map((f) => ({
+                        uid: String(f.id || `server-${Date.now()}-${Math.random()}`),
+                        name: f.ten_file,
+                        status: 'done',
+                        url: `${BASE_URL}/${f.duong_dan.replaceAll('\\', '/').replace(/^\//, '')}`
+                    }));
+
+                    // Keep any pre-existing server items + newly uploaded serverFiles
+                    const existingServer = fileList.filter((f) => !f.originFileObj).map((f) => ({
+                        uid: String(f.uid), name: f.name, status: f.status || 'done', url: f.url
+                    }));
+
+                    setFileList([...existingServer, ...serverFiles]);
+                    message.success('Đã tải lên tệp đính kèm!');
+                }
             }
 
             setIsModalVisible(false);
-            setFileList([]); // Quét sạch file list để chuẩn bị cho lần tạo mới tiếp theo
+            // do not clear fileList here — keep server-side entries for visibility
             fetchData();
         } catch (error) {
             // Trích xuất thông báo lỗi chi tiết (detail) mà Backend gửi về
@@ -193,7 +223,14 @@ const ListVanBanDen = () => {
             ngay_ban_hanh: record.ngay_ban_hanh ? dayjs(record.ngay_ban_hanh) : null,
             han_giai_quyet: record.han_giai_quyet ? dayjs(record.han_giai_quyet) : null,
         });
-        setFileList([]); // Tạm thời clear khi bấm Sửa
+
+        const formattedFiles = (record.tep_dinh_kems || []).map((f) => ({
+            uid: String(f.id),
+            name: f.ten_file,
+            status: 'done',
+            url: `${BASE_URL}/${f.duong_dan.replaceAll('\\', '/').replace(/^\//, '')}`
+        }));
+        setFileList(formattedFiles);
         setIsModalVisible(true);
     };
 
@@ -272,40 +309,27 @@ const ListVanBanDen = () => {
         },
         {
             title: 'Tệp đính kèm',
+            dataIndex: 'tep_dinh_kems',
             key: 'tep_dinh_kems',
             width: 220,
-            render: (_, record) => {
-                const files = record.tep_dinh_kems || [];
-                if (!files.length) return <span style={{ color: '#bfbfbf' }}>Không có file</span>;
+            render: (tep_dinh_kems) => {
+                const files = tep_dinh_kems || [];
+                if (!files.length) return 'Không có file';
 
                 return (
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        {files.map((file, i) => {
-                            const normalizedPath = file.duong_dan.replaceAll('\\', '/');
-                            const fileUrl = normalizedPath.startsWith('/') ? `${BASE_URL}${normalizedPath}` : `${BASE_URL}/${normalizedPath}`;
-
+                    <Space direction="vertical" size="mini">
+                        {files.map((file) => {
+                            const fileUrl = `${BASE_URL}/${file.duong_dan.replaceAll('\\', '/').replace(/^\//, '')}`;
                             return (
-                                <Tooltip title={file.ten_file} key={file.id || i} placement="topLeft">
-                                    <a
-                                        href={fileUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        style={{
-                                            display: 'block',
-                                            maxWidth: '200px',
-                                            whiteSpace: 'nowrap',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis'
-                                        }}
-                                    >
-                                        <PaperClipOutlined style={{ marginRight: '4px' }} />
+                                <Tooltip title={file.ten_file} key={file.id || file.ten_file} placement="topLeft">
+                                    <a href={fileUrl} target="_blank" rel="noreferrer">
+                                        <PaperClipOutlined style={{ marginRight: 6 }} />
                                         {file.ten_file}
                                     </a>
                                 </Tooltip>
                             );
                         })}
-                    </div>
+                    </Space>
                 );
             }
         },
@@ -488,13 +512,62 @@ const ListVanBanDen = () => {
                             <h4 style={{ marginBottom: 8 }}>Tệp đính kèm</h4>
                             <Dragger
                                 multiple
+                                listType="text"
                                 fileList={fileList}
-                                beforeUpload={() => false} // Chặn không cho Antd tự upload, để code tự kiểm soát
-                                onChange={({ fileList: newFileList }) => setFileList(newFileList)}
+                                showUploadList={true}
+                                itemRender={(originNode, file) => {
+                                    const displayName = file.name || (file.originFileObj && file.originFileObj.name) || 'Tệp';
+                                    const href = file.url || undefined; // only link server files
+                                    return (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            {href ? (
+                                                <a href={href} target="_blank" rel="noreferrer">{displayName}</a>
+                                            ) : (
+                                                <span>{displayName}</span>
+                                            )}
+                                        </div>
+                                    );
+                                }}
+                                beforeUpload={(file) => {
+                                    // Prevent Auto Upload — let onChange manage the controlled fileList
+                                    console.log('ListVanBanDen beforeUpload file:', file);
+                                    return false;
+                                }}
+                                onChange={(info) => {
+                                    console.log('ListVanBanDen onChange info:', info);
+                                    // Always sync controlled list from Upload's info.fileList
+                                    const normalized = info.fileList.map((f) => ({
+                                        ...f,
+                                        uid: String(f.uid),
+                                        name: f.name,
+                                        status: f.status || 'done',
+                                        originFileObj: f.originFileObj || f,
+                                    }));
+                                    setFileList(normalized);
+                                }}
+                                onRemove={(file) => {
+                                    console.log('ListVanBanDen onRemove file:', file);
+                                    setFileList((prev) => prev.filter((item) => item.uid !== String(file.uid)));
+                                }}
                             >
                                 <p className="ant-upload-drag-icon"><InboxOutlined /></p>
                                 <p className="ant-upload-text">Kéo thả hoặc click để chọn tệp (PDF, Word...)</p>
                             </Dragger>
+                            <div style={{ marginTop: 12, padding: '8px', background: '#f5f5f5', borderRadius: 6 }}>
+                                <strong>Debug fileList:</strong> {fileList.length} file(s)
+                                <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: 8 }}>
+                                    {JSON.stringify(fileList.map((file) => ({ uid: file.uid, name: file.name, status: file.status })), null, 2)}
+                                </pre>
+                                <div style={{ marginTop: 8 }}>
+                                    <strong>Tệp đã chọn:</strong>
+                                    <ul style={{ marginTop: 6 }}>
+                                        {fileList.length === 0 && <li style={{ color: '#888' }}>Chưa có tệp</li>}
+                                        {fileList.map((f) => (
+                                            <li key={String(f.uid)} style={{ wordBreak: 'break-word' }}>{f.name || (f.originFileObj && f.originFileObj.name) || 'Tệp'}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
                         </Col>
                     </Row>
                 </Form>

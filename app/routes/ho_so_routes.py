@@ -23,7 +23,8 @@ def tao_ho_so(
 ):
     kiem_tra = db.query(HoSo).filter(HoSo.ma_ho_so == ho_so.ma_ho_so).first()
     if kiem_tra:
-        raise HTTPException(status_code=400, detail="Mã hồ sơ đã tồn tại!")
+        raise HTTPException(
+            status_code=400, detail="Mã hồ sơ này đã tồn tại trên hệ thống!")
 
     ho_so_moi = HoSo(**ho_so.model_dump())
     db.add(ho_so_moi)
@@ -103,13 +104,22 @@ def xoa_ho_so(
     db: Session = Depends(get_db),
     nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
 ):
+    # 1. Tìm hồ sơ
     ho_so = db.query(HoSo).filter(HoSo.ma_ho_so == ma_ho_so).first()
     if not ho_so:
         raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ!")
 
+    # 2. CHẶN XÓA: Nếu hồ sơ đã đóng hoặc đã nộp lưu thì tuyệt đối không cho xóa
+    if ho_so.trang_thai in ["DA_DONG", "DA_NOP_LUU"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể xóa hồ sơ đã ở trạng thái {ho_so.trang_thai}!"
+        )
+
+    # 3. Thực hiện xóa nếu là hồ sơ DANG_MO
     db.delete(ho_so)
     db.commit()
-    return {"detail": "Xóa hồ sơ thành công!"}
+    return {"message": "Xóa hồ sơ thành công!"}
 
 
 @router.patch("/{ma_ho_so}/dong")
@@ -125,6 +135,39 @@ def dong_ho_so(
     ho_so.trang_thai = "DA_DONG"
     db.commit()
     return {"message": "Đã đóng hồ sơ thành công!"}
+
+
+@router.patch("/{ma_ho_so}/nop-luu")
+def nop_luu_ho_so(
+    ma_ho_so: str,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
+):
+    # 1. Kiểm tra hồ sơ tồn tại
+    ho_so = db.query(HoSo).filter(HoSo.ma_ho_so == ma_ho_so).first()
+    if not ho_so:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ")
+
+    # 2. Kiểm tra hồ sơ đã đóng chưa
+    if ho_so.trang_thai != "DA_DONG":
+        raise HTTPException(
+            status_code=400, detail="Chỉ hồ sơ đã đóng mới được nộp lưu!")
+
+    # 3. Kiểm tra hồ sơ rỗng
+    so_luong_vb_den = db.query(VanBanDen).filter(
+        VanBanDen.ma_ho_so == ma_ho_so).count()
+    so_luong_vb_di = db.query(VanBanDi).filter(
+        VanBanDi.ma_ho_so == ma_ho_so).count()
+
+    if (so_luong_vb_den + so_luong_vb_di) == 0:
+        raise HTTPException(
+            status_code=400, detail="Hồ sơ rỗng không được nộp lưu!")
+
+    # 4. Cập nhật trạng thái
+    ho_so.trang_thai = "DA_NOP_LUU"
+    db.commit()
+
+    return {"message": "Nộp lưu hồ sơ thành công!"}
 
 
 @router.get("/{ma_ho_so}/van-ban")

@@ -1,8 +1,15 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
-# Schema nhận dữ liệu từ người dùng gửi lên
+
+class VaiTroResponse(BaseModel):
+    id: int
+    ma_vai_tro: str
+    ten_vai_tro: str
+
+    class Config:
+        from_attributes = True
 
 
 class TaiKhoanCreate(BaseModel):
@@ -10,8 +17,8 @@ class TaiKhoanCreate(BaseModel):
     mat_khau: str
     can_bo_id: Optional[int] = None
     trang_thai: Optional[str] = "ACTIVE"
-
-# Schema trả kết quả về (CHÚ Ý: Không bao giờ trả về mật khẩu)
+    # <--- Trường này rất quan trọng để nhận quyền từ form
+    vai_tro_ids: List[int] = []
 
 
 class TaiKhoanResponse(BaseModel):
@@ -20,6 +27,8 @@ class TaiKhoanResponse(BaseModel):
     can_bo_id: Optional[int]
     trang_thai: str
     ngay_tao: datetime
+    # <--- Trường này để Backend gửi quyền ra Frontend
+    vai_tros: List[VaiTroResponse] = []
 
     class Config:
         from_attributes = True

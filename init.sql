@@ -562,6 +562,12 @@ ALTER TABLE ho_so ADD COLUMN trang_thai VARCHAR(50) DEFAULT 'DANG_MO';
 ALTER TABLE van_ban_den ADD COLUMN trang_thai_xu_ly VARCHAR(50) DEFAULT 'CHO_XU_LY';
 ALTER TABLE van_ban_di ADD COLUMN trang_thai VARCHAR(50) DEFAULT 'DRAFT';
 ALTER TABLE van_ban_den ADD COLUMN nguoi_xu_ly_id INTEGER REFERENCES can_bo(id) ON DELETE SET NULL;
+
+-- ALTER TABLE van_ban_di ADD COLUMN submitted_at TIMESTAMP WITHOUT TIME ZONE;
+-- ALTER TABLE van_ban_di ADD COLUMN approved_by VARCHAR(100);
+-- ALTER TABLE van_ban_di ADD COLUMN approved_at TIMESTAMP WITHOUT TIME ZONE;
+-- ALTER TABLE van_ban_di ADD COLUMN revoke_reason TEXT;
+
 COMMIT;
 
 -- =====================================================================

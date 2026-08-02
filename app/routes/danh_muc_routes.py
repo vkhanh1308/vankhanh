@@ -33,7 +33,10 @@ def tao_danh_muc(
 
 
 @router.get("/", response_model=list[DanhMucResponse])
-def lay_danh_sach_danh_muc(db: Session = Depends(get_db)):
+def lay_danh_sach_danh_muc(
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
+):
     return db.query(DanhMucLoaiVb).all()
 
 from app.schemas.danh_muc_schema import DanhMucUpdate  # Đảm bảo có khai báo schema này nếu cần

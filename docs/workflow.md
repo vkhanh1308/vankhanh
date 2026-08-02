@@ -72,3 +72,18 @@ Cho phép người dùng tạo mới một văn bản đi và lưu vào hệ th�
 
 ### Kết quả mong đợi
 - Một bản ghi văn bản đi mới được tạo và hiển thị trên danh sách.
+
+## 3. Luồng Nộp lưu Hồ sơ
+### Mục tiêu
+Chuyển hồ sơ đã đóng vào kho lưu trữ vĩnh viễn.
+### Điều kiện cần
+- Hồ sơ phải ở trạng thái `DA_DONG`.
+- Hồ sơ phải chứa ít nhất 1 Văn bản đến hoặc Văn bản đi.
+### Các bước
+1. Người dùng bấm nút "Nộp lưu" tại cột Thao tác.
+2. Hệ thống hiện Popconfirm xác nhận.
+3. Gọi API PATCH `/nop-luu`.
+4. Backend kiểm tra Guard clauses (Trạng thái, Rỗng).
+5. Cập nhật DB, trả về thông báo thành công.
+### Kết quả mong đợi
+Trạng thái hồ sơ chuyển thành `DA_NOP_LUU`, nút "Nộp lưu" bị ẩn đi trên UI.

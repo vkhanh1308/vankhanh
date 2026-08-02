@@ -1,10 +1,10 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 
 
 class TepDinhKemCreate(BaseModel):
-    loai_van_ban: str  # Chỉ được nhập: 'VAN_BAN_DEN' hoặc 'VAN_BAN_DI'
+    loai_van_ban: Literal['VAN_BAN_DEN', 'VAN_BAN_DI']
     van_ban_id: int
     ten_file: str
     duong_dan: str

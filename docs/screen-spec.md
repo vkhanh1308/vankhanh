@@ -158,3 +158,20 @@ Chứa các trường phụ:
   </Row>
 </Form>
 ```
+
+### Nút Nộp lưu
+- **Vị trí:** Cột Thao tác, chỉ hiện khi `record.trang_thai === 'DA_DONG'`.
+- **Component:** Ant Design Button + Popconfirm.
+- **Icon:** FileDoneOutlined.
+- **Màu sắc:** backgroundColor: '#1677ff' (Blue).
+- **Text:** Nộp lưu.
+- **Hàm:** `handleNopLuu` (đã được định nghĩa ở trên).
+- **Hàm:** `handleCancelNopLuu` (đã được định nghĩa ở trên).
+
+### Nút Hủy
+- **Vị trí:** Cột Thao tác, chỉ hiện khi `record.trang_thai === 'DA_DONG'`.
+- **Component:** Ant Design Button.
+- **Icon:** CloseOutlined.
+- **Màu sắc:** backgroundColor: '#f5222d' (Red).
+- **Text:** Hủy.
+

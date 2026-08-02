@@ -56,7 +56,8 @@ def thong_ke_tong_quan(
             "tong": tong_ho_so,
             "trang_thai": {
                 "DANG_MO": ho_so_theo_trang_thai.get("DANG_MO", 0),
-                "DA_DONG": ho_so_theo_trang_thai.get("DA_DONG", 0)
+                "DA_DONG": ho_so_theo_trang_thai.get("DA_DONG", 0),
+                "DA_NOP_LUU": ho_so_theo_trang_thai.get("DA_NOP_LUU", 0)
             }
         }
     }

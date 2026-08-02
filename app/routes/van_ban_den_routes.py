@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from config.database import get_db
 from sqlalchemy import func, or_
 from app.models.document import VanBanDen
-from app.schemas.van_ban_den_schema import VanBanDenCreate, VanBanDenUpdate, VanBanDenResponse
+from app.schemas.van_ban_den_schema import VanBanDenCreate, VanBanDenUpdate, VanBanDenResponse, PhanPhoiInput, TienDoInput
 from app.dependencies import lay_nguoi_dung_hien_tai
 from app.models.auth import TaiKhoan, CanBo
 from app.models.document import VanBanDen, FileDinhKem
@@ -29,10 +29,10 @@ def tao_van_ban_den(
     if van_ban.ma_ho_so:
         ho_so = db.query(HoSo).filter(
             HoSo.ma_ho_so == van_ban.ma_ho_so).first()
-        if ho_so and ho_so.trang_thai == "DA_DONG":
+        if ho_so and ho_so.trang_thai in {"DA_DONG", "DA_NOP_LUU"}:
             raise HTTPException(
                 status_code=400,
-                detail=f"Hồ sơ {van_ban.ma_ho_so} đã đóng, không thể thêm văn bản!"
+                detail="Không thể thêm/chỉnh sửa văn bản trong hồ sơ đã đóng hoặc đã nộp lưu!"
             )
 
     # 2. XỬ LÝ SỐ ĐẾN THÔNG MINH (Thay thế đoạn raise HTTPException cũ)
@@ -74,7 +74,7 @@ def lay_danh_sach_van_ban_den(
     db: Session = Depends(get_db),
     nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
 ):
-    query = db.query(VanBanDen)
+    query = db.query(VanBanDen).options(joinedload(VanBanDen.tep_dinh_kems))
 
     # Nếu có từ khóa, lọc dữ liệu
     if keyword:
@@ -153,7 +153,8 @@ def cap_nhat_van_ban_den(
     db: Session = Depends(get_db),
     nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
 ):
-    db_van_ban = db.query(VanBanDen).filter(VanBanDen.id == van_ban_id).first()
+    db_van_ban = db.query(VanBanDen).options(joinedload(
+        VanBanDen.tep_dinh_kems)).filter(VanBanDen.id == van_ban_id).first()
     if not db_van_ban:
         raise HTTPException(
             status_code=404, detail="Không tìm thấy văn bản đến này!")
@@ -161,10 +162,10 @@ def cap_nhat_van_ban_den(
     ma_ho_so_moi = van_ban_update.ma_ho_so if van_ban_update.ma_ho_so is not None else db_van_ban.ma_ho_so
     if ma_ho_so_moi:
         ho_so = db.query(HoSo).filter(HoSo.ma_ho_so == ma_ho_so_moi).first()
-        if ho_so and ho_so.trang_thai == "DA_DONG":
+        if ho_so and ho_so.trang_thai in {"DA_DONG", "DA_NOP_LUU"}:
             raise HTTPException(
                 status_code=400,
-                detail=f"Hồ sơ {ma_ho_so_moi} đã đóng, không thể đưa văn bản vào đây!"
+                detail="Không thể thêm/chỉnh sửa văn bản trong hồ sơ đã đóng hoặc đã nộp lưu!"
             )
 
     # --- BLOCK VALIDATE NGHIỆP VỤ KHI CẬP NHẬT ---
@@ -284,14 +285,6 @@ def upload_file_van_ban_den(
     return {"message": f"Đã tải lên {len(file_responses)} file thành công!", "files": file_responses}
 
 # --- BLOCK API PHÂN PHỐI VÀ XỬ LÝ VĂN BẢN ĐẾN ---
-
-
-class PhanPhoiInput(BaseModel):
-    nguoi_xu_ly_id: int
-
-
-class TienDoInput(BaseModel):
-    trang_thai_xu_ly: str
 
 
 @router.patch("/{id}/phan-phoi")

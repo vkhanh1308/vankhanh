@@ -37,6 +37,10 @@ const CreateVanBanDi = () => {
     const [fileList, setFileList] = useState([]);
     const [canBoOptions, setCanBoOptions] = useState([]);
 
+    useEffect(() => {
+        console.log('CreateVanBanDi fileList state:', fileList);
+    }, [fileList]);
+
     const getAuthHeaders = () => {
         const token = localStorage.getItem('access_token');
         return {
@@ -122,6 +126,14 @@ const CreateVanBanDi = () => {
                     stt_trong_ho_so: data.stt_trong_ho_so,
                     ma_ho_so: data.ma_ho_so,
                 });
+
+                const formattedFiles = (data.tep_dinh_kems || []).map((f) => ({
+                    uid: String(f.id),
+                    name: f.ten_file,
+                    status: 'done',
+                    url: `${BASE_URL}/${f.duong_dan.replaceAll('\\', '/').replace(/^\//, '')}`
+                }));
+                setFileList(formattedFiles);
             } catch (error) {
                 message.error('Không thể tải dữ liệu văn bản để chỉnh sửa.');
             } finally {
@@ -164,9 +176,18 @@ const CreateVanBanDi = () => {
             appendIfPresent('stt_trong_ho_so', values.stt_trong_ho_so);
             appendIfPresent('ma_ho_so', values.ma_ho_so);
 
-            fileList.forEach((file) => {
-                formData.append('files', file.originFileObj || file);
-            });
+            for (const file of fileList) {
+                if (file.originFileObj) {
+                    try {
+                        const original = file.originFileObj;
+                        const buffer = await original.arrayBuffer();
+                        const safeFile = new File([buffer], original.name, { type: original.type });
+                        formData.append('files', safeFile);
+                    } catch (e) {
+                        formData.append('files', file.originFileObj);
+                    }
+                }
+            }
 
             if (isEditMode) {
                 await axios.put(`${BASE_URL}/api/van-ban-di/${id}`, formData, {
@@ -185,7 +206,10 @@ const CreateVanBanDi = () => {
             }
 
             form.resetFields();
-            setFileList([]);
+            // After saving, keep server-returned items visible by converting local files to server-style entries if backend returned them.
+            // (Backend upload handling already creates URLs when you call upload endpoint.)
+            // For Create flow we simply clear local originFileObj flags so list shows as 'done'.
+            setFileList((prev) => prev.map((f) => ({ ...f, status: 'done' })));
             navigate('/van-ban-di');
         } catch (error) {
             const errorMsg =
@@ -381,9 +405,42 @@ const CreateVanBanDi = () => {
                             <Dragger
                                 accept=".pdf,.doc,.docx"
                                 multiple
+                                listType="text"
                                 fileList={fileList}
-                                beforeUpload={() => false}
-                                onChange={({ fileList: newFileList }) => setFileList(newFileList)}
+                                showUploadList={true}
+                                itemRender={(originNode, file) => {
+                                    const displayName = file.name || (file.originFileObj && file.originFileObj.name) || 'Tệp';
+                                    const href = file.url || undefined; // only link server files
+                                    return (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            {href ? (
+                                                <a href={href} target="_blank" rel="noreferrer">{displayName}</a>
+                                            ) : (
+                                                <span>{displayName}</span>
+                                            )}
+                                        </div>
+                                    );
+                                }}
+                                beforeUpload={(file) => {
+                                    // Prevent Auto Upload — let onChange manage the controlled fileList
+                                    console.log('CreateVanBanDi beforeUpload file:', file);
+                                    return false;
+                                }}
+                                onChange={(info) => {
+                                    console.log('CreateVanBanDi onChange info:', info);
+                                    const normalized = info.fileList.map((f) => ({
+                                        ...f,
+                                        uid: String(f.uid),
+                                        name: f.name,
+                                        status: f.status || 'done',
+                                        originFileObj: f.originFileObj || f,
+                                    }));
+                                    setFileList(normalized);
+                                }}
+                                onRemove={(file) => {
+                                    console.log('CreateVanBanDi onRemove file:', file);
+                                    setFileList((prev) => prev.filter((item) => item.uid !== String(file.uid)));
+                                }}
                             >
                                 <p className="ant-upload-drag-icon">
                                     <InboxOutlined />
@@ -395,6 +452,21 @@ const CreateVanBanDi = () => {
                                     Chỉ chấp nhận file PDF, DOC, DOCX
                                 </p>
                             </Dragger>
+                            <div style={{ marginTop: 12, padding: '8px', background: '#f5f5f5', borderRadius: 6 }}>
+                                <strong>Debug fileList:</strong> {fileList.length} file(s)
+                                <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginTop: 8 }}>
+                                    {JSON.stringify(fileList.map((file) => ({ uid: file.uid, name: file.name, status: file.status })), null, 2)}
+                                </pre>
+                                <div style={{ marginTop: 8 }}>
+                                    <strong>Tệp đã chọn:</strong>
+                                    <ul style={{ marginTop: 6 }}>
+                                        {fileList.length === 0 && <li style={{ color: '#888' }}>Chưa có tệp</li>}
+                                        {fileList.map((f) => (
+                                            <li key={String(f.uid)} style={{ wordBreak: 'break-word' }}>{f.name || (f.originFileObj && f.originFileObj.name) || 'Tệp'}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
                         </Col>
                     </Row>
 

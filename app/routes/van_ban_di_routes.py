@@ -1,20 +1,257 @@
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated, List, Optional
 from sqlalchemy import func
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from config.database import get_db
 from app.models.core import HoSo
 from app.models.document import FileDinhKem, VanBanDi, VanBanDen
-from app.schemas.van_ban_di_schema import VanBanDiCreate, VanBanDiResponse
+from app.schemas.van_ban_di_schema import VanBanDiCreate, VanBanDiResponse, TrangThaiUpdate, ReasonRequest
 from app.dependencies import lay_nguoi_dung_hien_tai
 from app.models.auth import TaiKhoan, CanBo
-from app.schemas.van_ban_di_schema import TrangThaiUpdate
 router = APIRouter(
     prefix="/api/van-ban-di",
     tags=["Quản lý Văn bản đi"]
 )
+
+WORKFLOW_TRANSITIONS = {
+    'DRAFT': {'PENDING_APPROVAL'},
+    'PENDING_APPROVAL': {'APPROVED', 'DRAFT'},
+    'APPROVED': {'PUBLISHED'},
+    'PUBLISHED': {'REVOKED'},
+    'REVOKED': set(),
+}
+
+
+def validate_transition(current_status: str, next_status: str):
+    allowed = WORKFLOW_TRANSITIONS.get(current_status, set())
+    if next_status not in allowed:
+        raise HTTPException(
+            status_code=400, detail="Chuyển đổi trạng thái không hợp lệ!")
+
+
+def get_van_ban_di(db: Session, id: int) -> VanBanDi:
+    van_ban = db.query(VanBanDi).options(joinedload(
+        VanBanDi.tep_dinh_kems)).filter(VanBanDi.id == id).first()
+    if not van_ban:
+        raise HTTPException(
+            status_code=404, detail="Không tìm thấy văn bản đi")
+    return van_ban
+
+
+def resolve_user_label(db: Session, nguoi_dung: TaiKhoan) -> str:
+    if getattr(nguoi_dung, "can_bo_id", None):
+        can_bo = db.query(CanBo).filter(
+            CanBo.id == nguoi_dung.can_bo_id).first()
+        if can_bo and can_bo.ho_ten:
+            return can_bo.ho_ten
+    return getattr(nguoi_dung, "ten_dang_nhap", "unknown")
+
+
+def apply_status_transition(
+    van_ban_di: VanBanDi,
+    next_status: str,
+    db: Session,
+    nguoi_dung: TaiKhoan,
+    reason: Optional[str] = None
+):
+    validate_transition(van_ban_di.trang_thai, next_status)
+    trang_thai_cu = van_ban_di.trang_thai
+    van_ban_di.trang_thai = next_status
+
+    if next_status == 'PENDING_APPROVAL':
+        van_ban_di.submitted_at = datetime.utcnow()
+        van_ban_di.approved_by = None
+        van_ban_di.approved_at = None
+        van_ban_di.revoke_reason = None
+
+    elif next_status == 'APPROVED':
+        van_ban_di.approved_by = resolve_user_label(db, nguoi_dung)
+        van_ban_di.approved_at = datetime.utcnow()
+        van_ban_di.revoke_reason = None
+
+    elif next_status == 'PUBLISHED':
+        van_ban_di.revoke_reason = None
+        try:
+            max_so_den = db.query(func.max(VanBanDen.so_den)).scalar() or 0
+            ten_nguoi_ky = ""
+            if van_ban_di.nguoi_ky_id:
+                nguoi_ky = db.query(CanBo).filter(
+                    CanBo.id == van_ban_di.nguoi_ky_id).first()
+                ten_nguoi_ky = nguoi_ky.ho_ten if nguoi_ky else ""
+
+            van_ban_den_moi = VanBanDen(
+                so_den=max_so_den + 1,
+                ky_hieu=van_ban_di.so_ky_hieu,
+                ngay_den=date.today(),
+                ngay_ban_hanh=van_ban_di.ngay_ban_hanh,
+                co_quan_ban_hanh_id=van_ban_di.don_vi_soan_thao_id,
+                ma_loai_vb_id=van_ban_di.ma_loai_vb_id,
+                trich_yeu=van_ban_di.trich_yeu,
+                so_trang=van_ban_di.so_trang,
+                ho_ten_nguoi_ky=ten_nguoi_ky,
+                chuc_vu_nguoi_ky=van_ban_di.chuc_vu_nguoi_ky,
+                do_khan=van_ban_di.muc_do_khan,
+                don_vi_nhan=van_ban_di.noi_nhan,
+                trang_thai_xu_ly='CHO_XU_LY'
+            )
+            db.add(van_ban_den_moi)
+            db.flush()
+
+            tep_dinh_kems = db.query(FileDinhKem).filter(
+                FileDinhKem.van_ban_id == van_ban_di.id,
+                FileDinhKem.loai_van_ban == 'VAN_BAN_DI'
+            ).all()
+
+            for tep in tep_dinh_kems:
+                tep_moi = FileDinhKem(
+                    loai_van_ban='VAN_BAN_DEN',
+                    van_ban_id=van_ban_den_moi.id,
+                    ten_file=tep.ten_file,
+                    duong_dan=tep.duong_dan,
+                    dinh_dang=tep.dinh_dang,
+                    dung_luong=tep.dung_luong
+                )
+                db.add(tep_moi)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=500, detail=f"Lỗi hệ thống khi liên thông văn bản: {str(e)}")
+
+    elif next_status == 'REVOKED':
+        if not reason:
+            raise HTTPException(
+                status_code=400,
+                detail='Lý do thu hồi là bắt buộc khi chuyển trạng thái sang REVOKED!'
+            )
+        van_ban_di.revoke_reason = reason
+        if trang_thai_cu == 'PUBLISHED':
+            try:
+                van_ban_den_can_huy = db.query(VanBanDen).filter(
+                    VanBanDen.ky_hieu == van_ban_di.so_ky_hieu,
+                    VanBanDen.co_quan_ban_hanh_id == van_ban_di.don_vi_soan_thao_id
+                ).first()
+
+                if van_ban_den_can_huy:
+                    db.query(FileDinhKem).filter(
+                        FileDinhKem.van_ban_id == van_ban_den_can_huy.id,
+                        FileDinhKem.loai_van_ban == 'VAN_BAN_DEN'
+                    ).delete()
+                    db.delete(van_ban_den_can_huy)
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Lỗi hệ thống khi thu hồi văn bản liên thông: {str(e)}"
+                )
+
+    elif next_status == 'DRAFT':
+        van_ban_di.submitted_at = None
+        van_ban_di.approved_by = None
+        van_ban_di.approved_at = None
+        van_ban_di.revoke_reason = reason if reason else None
+
+    return {
+        'message': 'Cập nhật trạng thái thành công!',
+        'trang_thai_moi': van_ban_di.trang_thai,
+        'lien_thong_thanh_cong': next_status == 'PUBLISHED' and trang_thai_cu != 'PUBLISHED'
+    }
+
+
+@router.post("/{id}/submit")
+def submit_van_ban_di(
+    id: int,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
+):
+    van_ban = get_van_ban_di(db, id)  # Eager-load tep_dinh_kems relationship
+    if van_ban.trang_thai != 'DRAFT':
+        raise HTTPException(
+            status_code=400,
+            detail='Chỉ có thể gửi duyệt khi văn bản đang ở trạng thái DRAFT.'
+        )
+    result = apply_status_transition(
+        van_ban, 'PENDING_APPROVAL', db, nguoi_dung)
+    db.commit()
+    db.refresh(van_ban)
+    return result
+
+
+@router.post("/{id}/approve")
+def approve_van_ban_di(
+    id: int,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
+):
+    van_ban = get_van_ban_di(db, id)
+    if van_ban.trang_thai != 'PENDING_APPROVAL':
+        raise HTTPException(
+            status_code=400,
+            detail='Chỉ có thể duyệt khi văn bản đang ở trạng thái PENDING_APPROVAL.'
+        )
+    result = apply_status_transition(van_ban, 'APPROVED', db, nguoi_dung)
+    db.commit()
+    db.refresh(van_ban)
+    return result
+
+
+@router.post("/{id}/request-changes")
+def request_changes_van_ban_di(
+    id: int,
+    data: ReasonRequest,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
+):
+    van_ban = get_van_ban_di(db, id)
+    if van_ban.trang_thai != 'PENDING_APPROVAL':
+        raise HTTPException(
+            status_code=400,
+            detail='Chỉ có thể trả về sửa đổi khi văn bản đang ở trạng thái PENDING_APPROVAL.'
+        )
+    result = apply_status_transition(
+        van_ban, 'DRAFT', db, nguoi_dung, reason=data.reason)
+    db.commit()
+    db.refresh(van_ban)
+    return result
+
+
+@router.post("/{id}/publish")
+def publish_van_ban_di(
+    id: int,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
+):
+    van_ban = get_van_ban_di(db, id)
+    if van_ban.trang_thai != 'APPROVED':
+        raise HTTPException(
+            status_code=400,
+            detail='Chỉ có thể phát hành khi văn bản đang ở trạng thái APPROVED.'
+        )
+    result = apply_status_transition(van_ban, 'PUBLISHED', db, nguoi_dung)
+    db.commit()
+    db.refresh(van_ban)
+    return result
+
+
+@router.post("/{id}/revoke")
+def revoke_van_ban_di(
+    id: int,
+    data: ReasonRequest,
+    db: Session = Depends(get_db),
+    nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
+):
+    van_ban = get_van_ban_di(db, id)
+    if van_ban.trang_thai != 'PUBLISHED':
+        raise HTTPException(
+            status_code=400,
+            detail='Chỉ có thể thu hồi khi văn bản đang ở trạng thái PUBLISHED.'
+        )
+    result = apply_status_transition(
+        van_ban, 'REVOKED', db, nguoi_dung, reason=data.reason)
+    db.commit()
+    db.refresh(van_ban)
+    return result
 
 
 @router.post("/", response_model=VanBanDiResponse)
@@ -42,10 +279,10 @@ async def tao_van_ban_di(
 
     if ma_ho_so:
         ho_so = db.query(HoSo).filter(HoSo.ma_ho_so == ma_ho_so).first()
-        if ho_so and ho_so.trang_thai == "DA_DONG":
+        if ho_so and ho_so.trang_thai in {"DA_DONG", "DA_NOP_LUU"}:
             raise HTTPException(
                 status_code=400,
-                detail=f"Hồ sơ {ma_ho_so} đã đóng, không thể thêm văn bản mới vào hồ sơ này!"
+                detail="Không thể thêm/chỉnh sửa văn bản trong hồ sơ đã đóng hoặc đã nộp lưu!"
             )
 
     # --- BLOCK VALIDATE NGHIỆP VỤ ---
@@ -160,18 +397,20 @@ async def cap_nhat_van_ban_di(
     db: Session = Depends(get_db),
     nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
 ):
-    van_ban = db.query(VanBanDi).filter(VanBanDi.id == id).first()
-    if not van_ban:
+    van_ban = get_van_ban_di(db, id)
+    if van_ban.trang_thai in {"PUBLISHED", "REVOKED"}:
         raise HTTPException(
-            status_code=404, detail="Không tìm thấy văn bản đi")
+            status_code=400,
+            detail="Không thể chỉnh sửa văn bản đã phát hành hoặc đã thu hồi!"
+        )
     ma_ho_so_moi = ma_ho_so if ma_ho_so is not None else van_ban.ma_ho_so
 
     if ma_ho_so_moi:
         ho_so = db.query(HoSo).filter(HoSo.ma_ho_so == ma_ho_so_moi).first()
-        if ho_so and ho_so.trang_thai == "DA_DONG":
+        if ho_so and ho_so.trang_thai in {"DA_DONG", "DA_NOP_LUU"}:
             raise HTTPException(
                 status_code=400,
-                detail=f"Hồ sơ {ma_ho_so_moi} đã đóng, không thể đưa văn bản vào đây!"
+                detail="Không thể thêm/chỉnh sửa văn bản trong hồ sơ đã đóng hoặc đã nộp lưu!"
             )
     # --- BLOCK VALIDATE NGHIỆP VỤ KHI CẬP NHẬT ---
     ngay_ban_hanh_check = ngay_ban_hanh if ngay_ban_hanh else van_ban.ngay_ban_hanh
@@ -282,17 +521,18 @@ def xoa_van_ban_di(id: int, db: Session = Depends(get_db), nguoi_dung: TaiKhoan 
 def lay_danh_sach_van_ban_di(
     page: int = 1,
     size: int = 10,
-    keyword: str = None,  # Hỗ trợ tìm kiếm từ khóa
+    keyword: str = "",  # Hỗ trợ tìm kiếm từ khóa
     db: Session = Depends(get_db),
     nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
 ):
-    query = db.query(VanBanDi)
+    query = db.query(VanBanDi).options(joinedload(VanBanDi.tep_dinh_kems))
 
-    # Lọc theo từ khóa nếu có
-    if keyword:
+    # Lọc theo từ khóa nếu có và không phải chuỗi trắng
+    if keyword and keyword.strip():
+        safe_keyword = keyword.strip()
         query = query.filter(
-            VanBanDi.trich_yeu.contains(keyword) |
-            VanBanDi.so_ky_hieu.contains(keyword)
+            VanBanDi.trich_yeu.contains(safe_keyword) |
+            VanBanDi.so_ky_hieu.contains(safe_keyword)
         )
 
     total = query.count()
@@ -308,94 +548,9 @@ def cap_nhat_trang_thai(
     db: Session = Depends(get_db),
     nguoi_dung: TaiKhoan = Depends(lay_nguoi_dung_hien_tai)
 ):
-    # 1. Tìm văn bản đi hiện tại
-    van_ban_di = db.query(VanBanDi).filter(VanBanDi.id == id).first()
-    if not van_ban_di:
-        raise HTTPException(
-            status_code=404, detail="Không tìm thấy văn bản đi!")
-
-    # Lưu lại trạng thái cũ trước khi cập nhật
-    trang_thai_cu = van_ban_di.trang_thai
-    van_ban_di.trang_thai = data.trang_thai  # Cập nhật sang trạng thái mới
-
-    # 2. LOGIC LIÊN THÔNG: Chỉ kích hoạt khi chuyển sang PUBLISHED
-    if trang_thai_cu != 'PUBLISHED' and data.trang_thai == 'PUBLISHED':
-        try:
-            # Tự động tính "Số đến" tiếp theo
-            max_so_den = db.query(func.max(VanBanDen.so_den)).scalar() or 0
-
-            # Tìm tên người ký từ bảng Cán Bộ
-            ten_nguoi_ky = ""
-            if van_ban_di.nguoi_ky_id:
-                nguoi_ky = db.query(CanBo).filter(
-                    CanBo.id == van_ban_di.nguoi_ky_id).first()
-                ten_nguoi_ky = nguoi_ky.ho_ten if nguoi_ky else ""
-
-            # TẠO VĂN BẢN ĐẾN MỚI TỪ DỮ LIỆU CỦA VĂN BẢN ĐI
-            van_ban_den_moi = VanBanDen(
-                so_den=max_so_den + 1,
-                ky_hieu=van_ban_di.so_ky_hieu,
-                ngay_den=date.today(),
-                ngay_ban_hanh=van_ban_di.ngay_ban_hanh,
-                co_quan_ban_hanh_id=van_ban_di.don_vi_soan_thao_id,
-                ma_loai_vb_id=van_ban_di.ma_loai_vb_id,
-                trich_yeu=van_ban_di.trich_yeu,
-                so_trang=van_ban_di.so_trang,
-                ho_ten_nguoi_ky=ten_nguoi_ky,
-                chuc_vu_nguoi_ky=van_ban_di.chuc_vu_nguoi_ky,
-                do_khan=van_ban_di.muc_do_khan,
-                don_vi_nhan=van_ban_di.noi_nhan,
-                trang_thai_xu_ly='CHO_XU_LY'  # Gắn trạng thái chờ xử lý cho bên nhận
-            )
-            db.add(van_ban_den_moi)
-            db.flush()  # Cấp ID cho văn bản đến mới nhưng chưa commit DB
-
-            # COPY LUÔN CÁC FILE ĐÍNH KÈM
-            tep_dinh_kems = db.query(FileDinhKem).filter(
-                FileDinhKem.van_ban_id == van_ban_di.id,
-                FileDinhKem.loai_van_ban == 'VAN_BAN_DI'
-            ).all()
-
-            for tep in tep_dinh_kems:
-                tep_moi = FileDinhKem(
-                    loai_van_ban='VAN_BAN_DEN',
-                    van_ban_id=van_ban_den_moi.id,  # Gắn vào ID văn bản đến mới
-                    ten_file=tep.ten_file,
-                    duong_dan=tep.duong_dan,
-                    dinh_dang=tep.dinh_dang,
-                    dung_luong=tep.dung_luong
-                )
-                db.add(tep_moi)
-
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(
-                status_code=500, detail=f"Lỗi hệ thống khi liên thông văn bản: {str(e)}")
-
-    elif trang_thai_cu == 'PUBLISHED' and data.trang_thai == 'REVOKED':
-        try:
-            # Tìm Văn bản đến đã được tự động sinh ra trước đó
-            van_ban_den_can_huy = db.query(VanBanDen).filter(
-                VanBanDen.ky_hieu == van_ban_di.so_ky_hieu,
-                VanBanDen.co_quan_ban_hanh_id == van_ban_di.don_vi_soan_thao_id
-            ).first()
-
-            if van_ban_den_can_huy:
-                # 3.1. Xóa các File đính kèm của Văn bản đến này
-                db.query(FileDinhKem).filter(
-                    FileDinhKem.van_ban_id == van_ban_den_can_huy.id,
-                    FileDinhKem.loai_van_ban == 'VAN_BAN_DEN'
-                ).delete()
-
-                # 3.2. Xóa Văn bản đến (Hủy theo đúng NĐ 30)
-                db.delete(van_ban_den_can_huy)
-
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(
-                status_code=500, detail=f"Lỗi hệ thống khi thu hồi văn bản liên thông: {str(e)}")
-
-    # 3. Lưu toàn bộ thay đổi (cả trạng thái VB đi và VB đến mới tạo)
+    van_ban_di = get_van_ban_di(db, id)
+    result = apply_status_transition(
+        van_ban_di, data.trang_thai, db, nguoi_dung)
     db.commit()
     db.refresh(van_ban_di)
 
@@ -520,3 +675,4 @@ def phe_duyet_van_ban_di(
         "message": "Xử lý phê duyệt văn bản đi thành công!",
         "trang_thai_hien_tai": van_ban.trang_thai
     }
+    return result

@@ -14,3 +14,4 @@ class TokenResponse(BaseModel):
     token_type: str
     tai_khoan_id: int
     ten_dang_nhap: str
+    vai_tros: list[str] = []
