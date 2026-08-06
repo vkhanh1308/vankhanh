@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT_DIR))
+
 from config.database import engine, Base
 from sqlalchemy import text
 # Import toàn bộ model để SQLAlchemy nhận diện được các bảng

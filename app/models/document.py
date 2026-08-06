@@ -98,11 +98,50 @@ class FileDinhKem(Base):
     ngay_tao = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class OCRJob(Base):
+    __tablename__ = "ocr_job"
+    id = Column(Integer, primary_key=True, index=True)
+    file_name = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    status = Column(String(30), nullable=False, default="PENDING")
+    loai_van_ban = Column(String(20), nullable=True)
+    van_ban_id = Column(Integer, nullable=True)
+    full_text = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    processed_at = Column(DateTime, nullable=True)
+    extracted_items = relationship("OCRExtractedItem", back_populates="job", order_by="OCRExtractedItem.order", lazy='select')
+
+
+class OCRExtractedItem(Base):
+    __tablename__ = "ocr_extracted_item"
+    id = Column(Integer, primary_key=True, index=True)
+    ocr_job_id = Column(Integer, ForeignKey("ocr_job.id", ondelete="CASCADE"), nullable=False)
+    label = Column(String(150), nullable=False)
+    text = Column(Text, nullable=False)
+    confidence = Column(Float, nullable=False)
+    x1 = Column(Integer, nullable=False)
+    y1 = Column(Integer, nullable=False)
+    x2 = Column(Integer, nullable=False)
+    y2 = Column(Integer, nullable=False)
+    order = Column(Integer, nullable=False, default=1)
+
+    job = relationship("OCRJob", back_populates="extracted_items")
+
+
 class DanhMucLoaiQuyetDinh(Base):
     __tablename__ = "danh_muc_loai_quyet_dinh"
     id = Column(Integer, primary_key=True, index=True)
     ma_loai_quyet_dinh = Column(String(50), unique=True, nullable=False)
     ten_loai_quyet_dinh = Column(String(150), nullable=False)
+    mo_ta = Column(Text)
+
+
+class DanhMucVaiTroQuyetDinh(Base):
+    __tablename__ = "danh_muc_vai_tro_quyet_dinh"
+    id = Column(Integer, primary_key=True, index=True)
+    ma_vai_tro = Column(String(50), unique=True, nullable=False)
+    ten_vai_tro = Column(String(150), nullable=False)
     mo_ta = Column(Text)
 
 
@@ -125,6 +164,33 @@ class QuyetDinh(Base):
     ngay_tao = Column(DateTime, default=datetime.utcnow, nullable=False)
     ngay_cap_nhat = Column(DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow, nullable=False)
+    # Relationship to pull participant snapshots when returning a decision
+    thanh_phan = relationship("ThanhPhanQuyetDinh", backref="quyet_dinh", order_by="ThanhPhanQuyetDinh.thu_tu", lazy='select')
+
+
+class ThanhPhanQuyetDinh(Base):
+    __tablename__ = "thanh_phan_quyet_dinh"
+    id = Column(Integer, primary_key=True, index=True)
+    quyet_dinh_id = Column(Integer, ForeignKey(
+        "quyet_dinh.id", ondelete="CASCADE"), nullable=False)
+
+    # Có thể chọn cán bộ đã có trong hệ thống
+    can_bo_id = Column(Integer, ForeignKey(
+        "can_bo.id", ondelete="SET NULL"))
+
+    # Snapshot fields stored on the decision (to keep historical record)
+    ho_ten = Column(String(100), nullable=False)
+    don_vi_id = Column(Integer, ForeignKey(
+        "co_quan_to_chuc.id", ondelete="SET NULL"))
+    ten_don_vi = Column(String(255))
+    chuc_vu = Column(String(100))
+
+    # Vai trò trong quyết định (tham chiếu tới bảng danh_muc_vai_tro_quyet_dinh)
+    vai_tro_quyet_dinh_id = Column(Integer, ForeignKey(
+        "danh_muc_vai_tro_quyet_dinh.id", ondelete="RESTRICT"), nullable=False)
+    noi_dung_lien_quan = Column(Text)
+    thu_tu = Column(Integer, default=1, nullable=False)
+    ghi_chu = Column(Text)
 
 
 class LichSuQuyetDinh(Base):

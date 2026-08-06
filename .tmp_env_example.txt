@@ -1,0 +1,3 @@
+# Cấu hình Database PostgreSQL
+# Thay 'postgres' bằng user của bạn, 'YOUR_PASSWORD' bằng mật khẩu pgAdmin của bạn
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/document_management

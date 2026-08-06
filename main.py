@@ -18,6 +18,10 @@ from app.routes import tep_dinh_kem_routes
 from app.routes import can_bo_routes
 from app.routes import vi_tri_routes
 from app.routes import thong_ke_routes
+from app.routes import quyet_dinh_routes
+from app.routes import danh_muc_vai_tro_quyet_dinh_routes
+from app.routes import ocr_routes
+
 # 3. Khởi tạo ứng dụng FastAPI
 app = FastAPI(title="Document Management System (DMS)")
 
@@ -54,6 +58,9 @@ app.include_router(tep_dinh_kem_routes.router)
 app.include_router(can_bo_routes.router)
 app.include_router(vi_tri_routes.router)
 app.include_router(thong_ke_routes.router)
+app.include_router(quyet_dinh_routes.router)
+app.include_router(danh_muc_vai_tro_quyet_dinh_routes.router)
+app.include_router(ocr_routes.router)
 
 
 @app.get("/")

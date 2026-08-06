@@ -17,3 +17,12 @@ class DanhMucResponse(BaseModel):
 
 class DanhMucUpdate(DanhMucCreate):
     pass
+
+class DanhMucVaiTroQuyetDinhResponse(BaseModel):
+    id: int
+    ma_vai_tro: str
+    ten_vai_tro: str
+    mo_ta: Optional[str]
+
+    class Config:
+        from_attributes = True

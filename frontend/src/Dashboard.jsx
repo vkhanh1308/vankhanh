@@ -9,6 +9,7 @@ const BASE_URL = 'http://localhost:8000';
 const Dashboard = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
 
     const getAuthHeaders = () => {
         const token = localStorage.getItem('access_token');
@@ -17,12 +18,15 @@ const Dashboard = () => {
 
     const fetchData = async () => {
         setLoading(true);
+        setError(null);
         try {
             const response = await axios.get(`${BASE_URL}/api/thong-ke/tong-quan`, { headers: getAuthHeaders() });
             setData(response.data);
         } catch (error) {
-            console.error("Lỗi tải dữ liệu thống kê");
-            message.error('Không thể tải dữ liệu thống kê');
+            console.error("Lỗi tải dữ liệu thống kê", error);
+            const detail = error?.response?.data?.detail || 'Không thể tải dữ liệu thống kê';
+            setError(detail);
+            message.error(detail);
         } finally {
             setLoading(false);
         }
@@ -32,11 +36,20 @@ const Dashboard = () => {
         fetchData();
     }, []);
 
-    if (loading || !data) return (
+    if (loading) return (
         <div style={{ textAlign: 'center', padding: '50px' }}>
             <Spin size="large" tip="Đang tải dữ liệu..." />
         </div>
     );
+
+    if (error) return (
+        <div style={{ textAlign: 'center', padding: '50px' }}>
+            <p style={{ marginBottom: 16, color: '#ff4d4f' }}>Lỗi khi tải dữ liệu: {error}</p>
+            <Button type="primary" onClick={fetchData}>Thử lại</Button>
+        </div>
+    );
+
+    if (!data) return null;
 
     const calcPercent = (value, total) => total === 0 ? 0 : Math.round((value / total) * 100);
 

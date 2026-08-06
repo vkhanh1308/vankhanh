@@ -1,5 +1,10 @@
+import sys
 import random
 from datetime import date, timedelta
+from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT_DIR))
+
 from config.database import SessionLocal
 from app.models.core import CoQuanToChuc, DanhMucLoaiVb, HoSo, ViTriLuuTru
 from app.models.auth import CanBo

@@ -56,7 +56,7 @@ html, body, #root {
   color: #fff !important;
   font-weight: 600 !important;
 }
-}
+
 
 .ant-menu-dark .ant-menu-item-selected {
   background: rgba(22, 119, 255, 0.2) !important;
@@ -117,7 +117,6 @@ html, body, #root {
   .ant-layout {
     margin-left: 80px;
   }
-}
 }
 
 body {

@@ -29,13 +29,15 @@ const AdminLayout = () => {
         { key: '/dashboard', icon: <DashboardOutlined />, label: 'Bảng điều khiển' },
         { key: '/van-ban-den', icon: <FileTextOutlined />, label: 'Văn bản đến' },
         { key: '/van-ban-di', icon: <SendOutlined />, label: 'Văn bản đi' },
+        { key: '/ocr', icon: <FileTextOutlined />, label: 'OCR Văn bản' },
+        { key: '/them-quyet-dinh', icon: <FileTextOutlined />, label: 'Quyết định' },
         { key: '/ho-so', icon: <FolderOpenOutlined />, label: 'Hồ sơ lưu trữ' },
         { key: '/can-bo', icon: <UserOutlined />, label: 'Cán bộ' },
         { key: '/co-quan', icon: <BankOutlined />, label: 'Cơ quan' },
         isAdmin ? {
             key: '/tai-khoan',
             icon: <UserOutlined />,
-            label: 'Quản lý tài khoản',
+            label: 'Tài khoản',
         } : null
     ].filter(Boolean);
 

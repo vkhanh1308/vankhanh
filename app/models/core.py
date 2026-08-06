@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey, Float, DateTime
 from config.database import Base
+from datetime import datetime
 
 
 class DanhMucLoaiVb(Base):
